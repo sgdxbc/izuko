@@ -8,6 +8,7 @@ from api_v3.query_service_pb2_grpc import *
 from google.protobuf.timestamp_pb2 import *
 from google.protobuf.json_format import MessageToDict
 
+operation_name = 'CoreAPI.UnixfsAPI.Get'
 with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
     stub = QueryServiceStub(channel)
     start_time_min = Timestamp()
@@ -16,7 +17,7 @@ with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
     start_time_max.FromDatetime(datetime.max)
     parameters = TraceQueryParameters(
         service_name='Kubo',
-        operation_name='Dual.FindProvidersAsync',
+        operation_name=operation_name,
         num_traces=1,
         start_time_min=start_time_min,
         start_time_max=start_time_max,
@@ -30,10 +31,10 @@ with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
                     trace_id = trace_id or span.trace_id
                     assert span.trace_id == trace_id
                     trace_spans.append(MessageToDict(span))
-                    if span.name == 'Dual.FindProvidersAsync':
+                    if span.name == operation_name:
                         start_time_min.FromNanoseconds(span.start_time_unix_nano)
                         start_time_max.FromNanoseconds(span.end_time_unix_nano)
-                        print(f'* Collect trace of Dual.FindProvidersAsync start {start_time_min.ToJsonString()} end {start_time_max.ToJsonString()}')
+                        print(f'* Collect trace of {operation_name} start {start_time_min.ToJsonString()} end {start_time_max.ToJsonString()}')
     assert trace_id is not None
     print(f'* Total span number {len(trace_spans)}')
     parameters = TraceQueryParameters(

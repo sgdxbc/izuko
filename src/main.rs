@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     println!("* Generate random data and add to canary");
     let output = Command::new("ssh")
         .arg(ipfs_canary_host)
-        .arg("dd if=/dev/random bs=1M count=1 of=testdata && ipfs add testdata -Q")
+        .arg("dd if=/dev/random bs=16M count=1 of=testdata && ipfs add testdata -Q")
         .output()?;
     if !output.status.success() {
         print!("{}", String::from_utf8(output.stderr)?);
@@ -42,32 +42,47 @@ fn main() -> anyhow::Result<()> {
     println!("* Wait for providing data {cid}");
     let status = Command::new("ssh")
         .arg(ipfs_canary_host)
+        .arg(format!("ipfs routing provide {cid}"))
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{status}")
+    }
+
+    println!("* Download data {cid}");
+    let status = Command::new("ssh")
+        .arg(ipfs_host)
         .arg(format!(
-            "ipfs routing provide {cid} && ipfs pin rm {cid} && ipfs repo gc && ipfs shutdown"
+            "timeout -s SIGINT 10s ipfs get -o /dev/null --progress=false {cid}"
         ))
+        .status()?;
+    if !status.success() {
+        println!("! Fail to download")
+    }
+
+    println!("* Clean downloaded blocks");
+    let status = Command::new("ssh")
+        .arg(ipfs_host)
+        .arg("ipfs repo gc")
         .status()?;
     if !status.success() {
         anyhow::bail!("{status}")
     }
 
     println!("* Canary daemon shutdown");
+    let status = Command::new("ssh")
+        .arg(ipfs_canary_host)
+        .arg(format!(
+            "ipfs pin rm {cid} && ipfs repo gc && ipfs shutdown"
+        ))
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{status}")
+    }
     daemon_session.join().map_err(|err| {
         err.downcast::<anyhow::Error>()
             .map(|err| *err)
             .unwrap_or(anyhow::anyhow!("unknown error"))
     })??;
-
-    println!("* Find provider for data {cid}");
-    let output = Command::new("ssh")
-        .arg(ipfs_host)
-        .arg(format!("ipfs routing findprovs --num-providers=1 {cid}"))
-        .output()?;
-    if !output.status.success() {
-        anyhow::bail!("{status}")
-    }
-    if String::from_utf8(output.stdout)?.trim().is_empty() {
-        println!("! Find provider failed")
-    }
 
     println!("* Wait IPFS to propagate trace");
     sleep(Duration::from_secs(10));
