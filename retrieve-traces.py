@@ -8,7 +8,7 @@ from api_v3.query_service_pb2_grpc import *
 from google.protobuf.timestamp_pb2 import *
 from google.protobuf.json_format import MessageToDict
 
-operation_name = 'CoreAPI.UnixfsAPI.Get'
+operation_name = sys.argv[2]
 with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
     stub = QueryServiceStub(channel)
     start_time_min = Timestamp()
@@ -37,6 +37,11 @@ with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
                         print(f'* Collect trace of {operation_name} start {start_time_min.ToJsonString()} end {start_time_max.ToJsonString()}')
     assert trace_id is not None
     print(f'* Total span number {len(trace_spans)}')
+    start_time_min = Timestamp()
+    start_time_min.FromNanoseconds(min(int(span['startTimeUnixNano']) for span in trace_spans))
+    start_time_max = Timestamp()
+    start_time_max.FromNanoseconds(max(int(span['endTimeUnixNano']) for span in trace_spans))
+    print(f'* Adjust to start {start_time_min.ToJsonString()} end {start_time_max.ToJsonString()}')
     parameters = TraceQueryParameters(
         service_name='Kubo',
         start_time_min=start_time_min,
@@ -51,8 +56,8 @@ with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
                         other_spans.append(MessageToDict(span))
     print(f'* Other in time range span number {len(other_spans)}')
 
-path = Path('traces')
-path.mkdir(exist_ok=True)
+path = Path(dict(enumerate(sys.argv)).get(3) or 'traces')
+path.mkdir(exist_ok=True, parents=True)
 with open(path / f'{start_time_min.ToJsonString()}.json', 'w') as trace_file:
     dump(trace_spans, trace_file)
 with open(path / f'{start_time_min.ToJsonString()}_other.json', 'w') as trace_file:

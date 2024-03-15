@@ -6,7 +6,7 @@ use std::{
 
 fn main() -> anyhow::Result<()> {
     let ipfs_host = "ec2-3-1-209-56.ap-southeast-1.compute.amazonaws.com";
-    let ipfs_canary_host = "ec2-18-142-162-160.ap-southeast-1.compute.amazonaws.com";
+    let ipfs_canary_host = "nat-canary";
 
     println!("* Rotate canary identity");
     let status = Command::new("ssh")
@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
             .stderr(Stdio::null())
             .status()
     });
-    sleep(Duration::from_millis(1200));
+    sleep(Duration::from_millis(4200));
 
     println!("* Generate random data and add to canary");
     let output = Command::new("ssh")
@@ -52,7 +52,7 @@ fn main() -> anyhow::Result<()> {
     let status = Command::new("ssh")
         .arg(ipfs_host)
         .arg(format!(
-            "timeout -s SIGINT 10s ipfs get -o /dev/null --progress=false {cid}"
+            "timeout -s SIGINT 100s ipfs get -o /dev/null --progress=false {cid}"
         ))
         .status()?;
     if !status.success() {
@@ -73,6 +73,7 @@ fn main() -> anyhow::Result<()> {
         .arg(ipfs_canary_host)
         .arg(format!(
             "ipfs pin rm {cid} && ipfs repo gc && ipfs shutdown"
+            // "ipfs pin rm {cid} && ipfs repo gc"
         ))
         .status()?;
     if !status.success() {
@@ -84,29 +85,29 @@ fn main() -> anyhow::Result<()> {
             .unwrap_or(anyhow::anyhow!("unknown error"))
     })??;
 
-    println!("* Wait IPFS to propagate trace");
-    sleep(Duration::from_secs(10));
+    // println!("* Wait IPFS to propagate trace");
+    // sleep(Duration::from_secs(10));
 
-    println!("* Retrieve trace");
-    let status = Command::new("python3")
-        .args(["retrieve-traces.py", ipfs_host])
-        .env(
-            "PYTHONPATH",
-            "./jaeger-idl/proto-gen-python:./jaeger-idl/proto-gen-python/github/com/gogo/protobuf/",
-        )
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("{status}")
-    }
+    // println!("* Retrieve trace");
+    // let status = Command::new("python3")
+    //     .args(["retrieve-traces.py", ipfs_host, "CoreAPI.UnixfsAPI.Get"])
+    //     .env(
+    //         "PYTHONPATH",
+    //         "./jaeger-idl/proto-gen-python:./jaeger-idl/proto-gen-python/github/com/gogo/protobuf/",
+    //     )
+    //     .status()?;
+    // if !status.success() {
+    //     anyhow::bail!("{status}")
+    // }
 
-    println!("* Restart telemetry collector");
-    let status = Command::new("ssh")
-        .arg(ipfs_host)
-        .arg("docker restart $(docker ps -q)")
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("{status}")
-    }
+    // println!("* Restart telemetry collector");
+    // let status = Command::new("ssh")
+    //     .arg(ipfs_host)
+    //     .arg("docker restart $(docker ps -q)")
+    //     .status()?;
+    // if !status.success() {
+    //     anyhow::bail!("{status}")
+    // }
 
     Ok(())
 }
