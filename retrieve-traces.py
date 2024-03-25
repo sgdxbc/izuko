@@ -9,7 +9,8 @@ from google.protobuf.timestamp_pb2 import *
 from google.protobuf.json_format import MessageToDict
 
 operation_name = sys.argv[2]
-with grpc.insecure_channel(f'{sys.argv[1]}:16685') as channel:
+options = [('grpc.max_receive_message_length', 100 << 20)]
+with grpc.insecure_channel(f'{sys.argv[1]}:16685', options=options) as channel:
     stub = QueryServiceStub(channel)
     start_time_min = Timestamp()
     start_time_min.FromDatetime(datetime.min)
