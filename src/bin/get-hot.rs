@@ -18,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     println!("* Disable reproviding");
     let status = Command::new("ssh")
         .arg(ipfs_host)
-        .arg("ipfs config Reprovider.Interval 0 && ipfs config --json Experimental.StrategicProviding true")
+        .arg("ipfs config --json Experimental.StrategicProviding true")
         .status()?;
     anyhow::ensure!(status.success());
 

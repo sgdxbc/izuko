@@ -13,20 +13,15 @@ fn main() -> anyhow::Result<()> {
         .status()?;
     anyhow::ensure!(status.success());
 
-    println!("* Install IPFS artifact");
-    let status = Command::new("ssh")
-        .arg(&host)
-        .arg("sudo cp ipfs /usr/local/bin")
-        .status()?;
-    anyhow::ensure!(status.success());
-
-    println!("* Configure IPFS");
+    println!("* Install IPFS artifact and configure");
     let status = Command::new("ssh")
         .arg(&host)
         .arg(concat!(
-            "ipfs init --profile server",
+            "sudo cp ipfs /usr/local/bin",
+            " && ipfs init --profile server",
             " && ipfs config Internal.Bitswap.ProviderSearchDelay 0",
-            " && ipfs config Reprovider.Strategy pinned"
+            " && sudo sysctl -w net.core.rmem_max=2500000",
+            " && sudo sysctl -w net.core.wmem_max=2500000",
         ))
         .status()?;
     anyhow::ensure!(status.success());

@@ -85,29 +85,29 @@ fn main() -> anyhow::Result<()> {
             .unwrap_or(anyhow::anyhow!("unknown error"))
     })??;
 
-    // println!("* Wait IPFS to propagate trace");
-    // sleep(Duration::from_secs(10));
+    println!("* Wait IPFS to propagate trace");
+    sleep(Duration::from_secs(10));
 
-    // println!("* Retrieve trace");
-    // let status = Command::new("python3")
-    //     .args(["retrieve-traces.py", ipfs_host, "CoreAPI.UnixfsAPI.Get"])
-    //     .env(
-    //         "PYTHONPATH",
-    //         "./jaeger-idl/proto-gen-python:./jaeger-idl/proto-gen-python/github/com/gogo/protobuf/",
-    //     )
-    //     .status()?;
-    // if !status.success() {
-    //     anyhow::bail!("{status}")
-    // }
+    println!("* Retrieve trace");
+    let status = Command::new("python3")
+        .args(["retrieve-traces.py", ipfs_host, "CoreAPI.UnixfsAPI.Get"])
+        .env(
+            "PYTHONPATH",
+            "./jaeger-idl/proto-gen-python:./jaeger-idl/proto-gen-python/github/com/gogo/protobuf/",
+        )
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{status}")
+    }
 
-    // println!("* Restart telemetry collector");
-    // let status = Command::new("ssh")
-    //     .arg(ipfs_host)
-    //     .arg("docker restart $(docker ps -q)")
-    //     .status()?;
-    // if !status.success() {
-    //     anyhow::bail!("{status}")
-    // }
+    println!("* Restart telemetry collector");
+    let status = Command::new("ssh")
+        .arg(ipfs_host)
+        .arg("docker restart $(docker ps -q)")
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{status}")
+    }
 
     Ok(())
 }
