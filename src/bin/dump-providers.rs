@@ -2,6 +2,7 @@ use std::{
     fmt::Write,
     path::Path,
     process::Stdio,
+    sync::{Arc, Mutex},
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -10,6 +11,8 @@ use tokio::{
     fs::{create_dir_all, write},
     process::Command,
     spawn,
+    sync::Semaphore,
+    task::JoinSet,
     time::{sleep, Instant},
 };
 
@@ -38,7 +41,18 @@ async fn main() -> anyhow::Result<()> {
             .stdout(Stdio::null())
             .status(),
     );
-    sleep(Duration::from_millis(4200)).await;
+    println!("* Wait for IPFS daemon up");
+    while {
+        sleep(Duration::from_millis(1000)).await;
+        let status = Command::new("ssh")
+            .arg(ipfs_host)
+            .arg("ipfs stats bw")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await?;
+        !status.success()
+    } {}
 
     let result = async {
         #[allow(non_snake_case, unused)]
@@ -67,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
             .error_for_status()?
             .text()
             .await?;
-        let mut find_provs_responses = find_provs
+        let find_provs_responses = find_provs
             .lines()
             .map(serde_json::from_str)
             .collect::<Result<Vec<FindProvs>, _>>()?
@@ -100,43 +114,78 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
 
-        let mut route_csv_content = String::new();
-        for response in &mut find_provs_responses {
-            println!("* Find provider {}", response.ID);
-            let start = Instant::now();
-            let output = Command::new("ssh")
-                .arg(ipfs_host)
-                .arg(format!(
-                    "timeout -s SIGINT 100s ipfs routing findpeer {}",
-                    response.ID
-                ))
-                .output()
-                .await?;
-            if output.status.success() {
-                let query_duration = start.elapsed();
-                response.Addrs = String::from_utf8(output.stdout)?
-                    .lines()
-                    .map(|line| line.trim().into())
-                    .collect();
-                writeln!(
-                    &mut route_csv_content,
-                    "{},{},{}",
-                    response.ID,
-                    ipfs_host.split('.').nth(1).unwrap_or("unknown"),
-                    query_duration.as_secs_f32()
-                )?;
-            } else {
-                println!("! Provider {} not routable", response.ID);
-                response.Addrs.clear()
-            }
+        let mut responses = Arc::new(Mutex::new(Vec::new()));
+        let mut route_csv_content = Arc::new(Mutex::new(String::new()));
+        let mut sessions = JoinSet::new();
+        let semaphore = Arc::new(Semaphore::new(10));
+        for response in find_provs_responses {
+            let id = response.ID;
+            let responses = responses.clone();
+            let route_csv_content = route_csv_content.clone();
+            let semaphore = semaphore.clone();
+            sessions.spawn(async move {
+                let _permit = semaphore.acquire().await;
+                println!("* Find provider {id}");
+                let mut addrs = Vec::new();
+                for i in 0..3 {
+                    let start = Instant::now();
+                    let output = Command::new("ssh")
+                        .arg(ipfs_host)
+                        .arg(format!("timeout -s SIGINT 100s ipfs routing findpeer {id}",))
+                        .output()
+                        .await?;
+                    if output.status.success() {
+                        let query_duration = start.elapsed();
+                        writeln!(
+                            &mut *route_csv_content
+                                .lock()
+                                .map_err(|err| anyhow::anyhow!("{err}"))?,
+                            "{id},{},{}",
+                            ipfs_host.split('.').nth(1).unwrap_or("unknown"),
+                            query_duration.as_secs_f32()
+                        )?;
+                        addrs = String::from_utf8(output.stdout)?
+                            .lines()
+                            .map(|line| line.trim().into())
+                            .collect();
+                        break;
+                    } else if output.status.code() != Some(1) {
+                        println!("! Provider {id} not routable");
+                        break;
+                    }
+                    println!("! Provider {id} not routable (#{i})");
+                }
+                responses
+                    .lock()
+                    .map_err(|err| anyhow::anyhow!("{err}"))?
+                    .push(FindProvsResponse {
+                        Addrs: addrs,
+                        ID: id,
+                    });
+                anyhow::Result::<_>::Ok(())
+            });
         }
+        let mut overall_result = Ok(());
+        while let Some(result) = sessions.join_next().await {
+            overall_result =
+                overall_result.and(result.map_err(Into::into).and_then(|result| result));
+        }
+        overall_result?;
 
         println!("* Dump provider records with explicit routing");
+        let responses = Arc::get_mut(&mut responses)
+            .ok_or(anyhow::anyhow!("unexpected reference"))?
+            .get_mut()
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
         write(
             path.with_extension("route.json"),
-            serde_json::to_vec_pretty(&find_provs_responses)?,
+            serde_json::to_vec_pretty(responses)?,
         )
         .await?;
+        let route_csv_content = Arc::get_mut(&mut route_csv_content)
+            .ok_or(anyhow::anyhow!("unexpected reference"))?
+            .get_mut()
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
         write(path.with_extension("route.csv"), route_csv_content).await?;
 
         Ok(())

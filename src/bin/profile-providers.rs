@@ -12,7 +12,7 @@ use tokio::{
     fs::{read, read_dir, write},
     process::Command,
     task::JoinSet,
-    time::Instant,
+    time::{sleep, Instant},
 };
 
 #[tokio::main(flavor = "current_thread")]
@@ -55,73 +55,24 @@ async fn main() -> anyhow::Result<()> {
         responses.len(),
         path.display()
     );
-
-    let mut sessions = JoinSet::new();
-    let mut responses = responses.into_iter();
-    for (index, find_provs) in responses.by_ref().take(10).enumerate() {
-        println!(
-            "* [{index:02}] Spawn download session with peer id {}",
-            find_provs.ID
-        );
-        sessions.spawn(get_session(
-            index,
-            ipfs_host.into(),
-            find_provs.ID,
-            find_provs.Addrs,
-            cid.into(),
-            dag,
-            false,
-            download_csv_content.clone(),
-        ));
-    }
-
-    // this part feels a little silly = =
-    let mut failed = false;
-    let mut overall_result = Ok(());
-    while let Some(result) = sessions.join_next().await {
-        let index = match result.map_err(Into::into).and_then(|result| result) {
-            Ok(index) => index,
-            Err(err) => {
-                println!("! {err}");
-                failed = true;
-                overall_result = Err(err);
-                continue;
-            }
-        };
-        if !failed {
-            if let Some(find_provs) = responses.next() {
-                sessions.spawn(get_session(
-                    index,
-                    ipfs_host.into(),
-                    find_provs.ID,
-                    find_provs.Addrs,
-                    cid.into(),
-                    dag,
-                    false,
-                    download_csv_content.clone(),
-                ));
-            }
-        }
-    }
-
-    overall_result?;
-
-    let responses = serde_json::from_slice::<Vec<FindProvsResponse>>(
+    let route_responses = serde_json::from_slice::<Vec<FindProvsResponse>>(
         &read(path.with_extension("route.json")).await?,
     )?;
     println!(
-        "* Loaded {} provider records from {} (explicit routing)",
-        responses.len(),
-        path.display()
+        "* Loaded {} provider records (explicit routing)",
+        responses.len()
     );
 
     let mut sessions = JoinSet::new();
-    let mut responses = responses.into_iter();
-    for (index, find_provs) in responses.by_ref().take(10).enumerate() {
-        println!(
-            "* [{index:02}] Spawn download session with peer id {}",
-            find_provs.ID
+    let mut responses = responses
+        .into_iter()
+        .map(|find_provs| (find_provs, false))
+        .chain(
+            route_responses
+                .into_iter()
+                .map(|find_provs| (find_provs, true)),
         );
+    for (index, (find_provs, route)) in responses.by_ref().take(10).enumerate() {
         sessions.spawn(get_session(
             index,
             ipfs_host.into(),
@@ -129,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
             find_provs.Addrs,
             cid.into(),
             dag,
-            true,
+            route,
             download_csv_content.clone(),
         ));
     }
@@ -148,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         if !failed {
-            if let Some(find_provs) = responses.next() {
+            if let Some((find_provs, route)) = responses.next() {
                 sessions.spawn(get_session(
                     index,
                     ipfs_host.into(),
@@ -156,13 +107,12 @@ async fn main() -> anyhow::Result<()> {
                     find_provs.Addrs,
                     cid.into(),
                     dag,
-                    true,
+                    route,
                     download_csv_content.clone(),
                 ));
             }
         }
     }
-
     overall_result?;
 
     println!("* Clean up IPFS directories");
@@ -182,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
     write(
         format!(
             "saved/profile-providers/{cid}/{}.download.csv",
-            UNIX_EPOCH.elapsed()?.as_secs_f32()
+            UNIX_EPOCH.elapsed()?.as_millis()
         ),
         download_csv_content,
     )
@@ -234,7 +184,7 @@ async fn get_session(
                 + "; ipfs shutdown"
                 + "; ipfs init --profile server,randomports"
                 + "; ipfs key rm old"
-                + "; ipfs pin ls --type recursive -q | ipfs pin rm"
+                + "; ipfs pin ls -t recursive -q | ipfs pin rm"
                 + "; ipfs key rotate -o old"
                 + " && ipfs repo gc"
                 + " && ipfs config Routing.Type none"
@@ -256,14 +206,25 @@ async fn get_session(
         String::from_utf8(output.stderr)
     );
 
-    println!("* [{index:02}] Start IPFS daemon");
+    println!("* [{index:02}] Start IPFS daemon for downloading from {id}");
     let mut daemon = Command::new("ssh")
         .arg(&ipfs_host)
         .arg(format!("IPFS_PATH=/tmp/ipfs-{index} ipfs daemon"))
         .stdout(Stdio::null())
         .spawn()?;
     let daemon_session = tokio::spawn(async move { daemon.wait().await });
-    tokio::time::sleep(Duration::from_millis(4200)).await;
+    println!("* [{index:02}] Wait for IPFS daemon up");
+    while {
+        sleep(Duration::from_millis(1000)).await;
+        let status = Command::new("ssh")
+            .arg(&ipfs_host)
+            .arg(format!("IPFS_PATH=/tmp/ipfs-{index} ipfs stats bw"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await?;
+        !status.success()
+    } {}
 
     'job: {
         println!("* [{index:02}] Connect provider peer");
