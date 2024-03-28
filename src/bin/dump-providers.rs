@@ -1,7 +1,17 @@
-use std::{process::Stdio, time::Duration};
+use std::{
+    fmt::Write,
+    path::Path,
+    process::Stdio,
+    time::{Duration, UNIX_EPOCH},
+};
 
-use serde::Deserialize;
-use tokio::{process::Command, spawn, time::sleep};
+use serde::{Deserialize, Serialize};
+use tokio::{
+    fs::{create_dir_all, write},
+    process::Command,
+    spawn,
+    time::{sleep, Instant},
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -41,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         #[allow(non_snake_case)]
-        #[derive(Deserialize, Debug)]
+        #[derive(Debug, Serialize, Deserialize)]
         struct FindProvsResponse {
             Addrs: Vec<String>,
             ID: String,
@@ -57,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             .error_for_status()?
             .text()
             .await?;
-        let find_provs_responses = find_provs
+        let mut find_provs_responses = find_provs
             .lines()
             .map(serde_json::from_str)
             .collect::<Result<Vec<FindProvs>, _>>()?
@@ -72,7 +82,63 @@ async fn main() -> anyhow::Result<()> {
             .collect::<Vec<_>>();
         anyhow::ensure!(find_provs_responses.len() < 10000);
 
-        println!("{find_provs_responses:?}");
+        // println!("{find_provs_responses:?}");
+
+        let path = format!(
+            "saved/dump-providers/{cid}/{}",
+            UNIX_EPOCH.elapsed()?.as_millis()
+        );
+        println!(
+            "* Dump {} provider records to {path}",
+            find_provs_responses.len()
+        );
+        let path = Path::new(&path);
+        create_dir_all(path.parent().unwrap()).await?;
+        write(
+            path.with_extension("json"),
+            serde_json::to_vec_pretty(&find_provs_responses)?,
+        )
+        .await?;
+
+        let mut route_csv_content = String::new();
+        for response in &mut find_provs_responses {
+            println!("* Find provider {}", response.ID);
+            let start = Instant::now();
+            let output = Command::new("ssh")
+                .arg(ipfs_host)
+                .arg(format!(
+                    "timeout -s SIGINT 100s ipfs routing findpeer {}",
+                    response.ID
+                ))
+                .output()
+                .await?;
+            if output.status.success() {
+                let query_duration = start.elapsed();
+                response.Addrs = String::from_utf8(output.stdout)?
+                    .lines()
+                    .map(|line| line.trim().into())
+                    .collect();
+                writeln!(
+                    &mut route_csv_content,
+                    "{},{},{}",
+                    response.ID,
+                    ipfs_host.split('.').nth(1).unwrap_or("unknown"),
+                    query_duration.as_secs_f32()
+                )?;
+            } else {
+                println!("! Provider {} not routable", response.ID);
+                response.Addrs.clear()
+            }
+        }
+
+        println!("* Dump provider records with explicit routing");
+        write(
+            path.with_extension("route.json"),
+            serde_json::to_vec_pretty(&find_provs_responses)?,
+        )
+        .await?;
+        write(path.with_extension("route.csv"), route_csv_content).await?;
+
         Ok(())
     }
     .await;
