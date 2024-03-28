@@ -18,20 +18,18 @@ use tokio::{
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
-    let ipfs_host = "ec2-3-1-209-56.ap-southeast-1.compute.amazonaws.com";
+    let ipfs_host = "ec2-54-233-234-50.sa-east-1.compute.amazonaws.com";
 
     // ipfs sigcomm'22
     // let cid = "bafybeiftyvcar3vh7zua3xakxkb2h5ppo4giu5f3rkpsqgcfh7n7axxnsa";
     // hello world DAG
-    // let cid = "baguqeerasords4njcts6vs7qvdjfcvgnume4hqohf65zsfguprqphs3icwea";
+    let cid = "baguqeerasords4njcts6vs7qvdjfcvgnume4hqohf65zsfguprqphs3icwea";
     // hello
-    let cid = "bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq";
+    // let cid = "bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq";
     // hello (blake3), appears no provider
     // let cid = "bafkr4ihkr4ld3m4gqkjf4reryxsy2s5tkbxprqkow6fin2iiyvreuzzab4";
     // apollo
     // let cid = "QmSnuWmxptJZdLJpKRarxBMS2Ju2oANVrgbr2xWbie9b2D";
-
-    // let dag = true;
 
     println!("* Start IPFS daemon");
     let daemon_session = spawn(

@@ -1,7 +1,7 @@
 use std::{
     fmt::Write,
-    mem::take,
     net::{Ipv4Addr, Ipv6Addr},
+    path::Path,
     process::Stdio,
     sync::{Arc, Mutex},
     time::{Duration, UNIX_EPOCH},
@@ -9,7 +9,7 @@ use std::{
 
 use serde::Deserialize;
 use tokio::{
-    fs::{read, read_dir, write},
+    fs::{create_dir_all, read, read_dir, write},
     process::Command,
     task::JoinSet,
     time::{sleep, Instant},
@@ -17,19 +17,21 @@ use tokio::{
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
-    let ipfs_host = "ec2-3-1-209-56.ap-southeast-1.compute.amazonaws.com";
+    let ipfs_host = "ec2-54-233-234-50.sa-east-1.compute.amazonaws.com";
 
     // ipfs sigcomm'22
     // let cid = "bafybeiftyvcar3vh7zua3xakxkb2h5ppo4giu5f3rkpsqgcfh7n7axxnsa";
     // hello world DAG
-    // let cid = "baguqeerasords4njcts6vs7qvdjfcvgnume4hqohf65zsfguprqphs3icwea";
+    let cid = "baguqeerasords4njcts6vs7qvdjfcvgnume4hqohf65zsfguprqphs3icwea";
     // hello
-    let cid = "bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq";
+    // let cid = "bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq";
     // hello (blake3), appears no provider
     // let cid = "bafkr4ihkr4ld3m4gqkjf4reryxsy2s5tkbxprqkow6fin2iiyvreuzzab4";
     // apollo
     // let cid = "QmSnuWmxptJZdLJpKRarxBMS2Ju2oANVrgbr2xWbie9b2D";
-    let dag = false;
+
+    // let dag = false;
+    let dag = true;
 
     #[allow(non_snake_case)]
     #[derive(Deserialize, Debug)]
@@ -45,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         path = path.max(entry_path)
     }
     let path = path.ok_or(anyhow::anyhow!("no dumped providers for {cid}"))?;
-    let download_csv_content = Arc::new(Mutex::new(String::new()));
+    let mut download_csv_content = Arc::new(Mutex::new(String::new()));
 
     let responses = serde_json::from_slice::<Vec<FindProvsResponse>>(
         &read(path.with_extension("json")).await?,
@@ -123,20 +125,18 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     anyhow::ensure!(status.success());
 
-    println!("* Save download metrics to {}", path.display());
-    let download_csv_content = take(
-        &mut *download_csv_content
-            .lock()
-            .map_err(|err| anyhow::anyhow!("{err}"))?,
+    let path = format!(
+        "saved/profile-providers/{cid}/{}.download.csv",
+        UNIX_EPOCH.elapsed()?.as_millis()
     );
-    write(
-        format!(
-            "saved/profile-providers/{cid}/{}.download.csv",
-            UNIX_EPOCH.elapsed()?.as_millis()
-        ),
-        download_csv_content,
-    )
-    .await?;
+    let path = Path::new(&path);
+    println!("* Save download metrics to {}", path.display());
+    create_dir_all(path.parent().unwrap()).await?;
+    let download_csv_content = Arc::get_mut(&mut download_csv_content)
+        .ok_or(anyhow::anyhow!("unexpected reference"))?
+        .get_mut()
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    write(path, download_csv_content).await?;
     Ok(())
 }
 
@@ -246,14 +246,15 @@ async fn get_session(
         let status = Command::new("ssh")
             .arg(&ipfs_host)
             .arg(format!(
-                "IPFS_PATH=/tmp/ipfs-{index} timeout -s SIGINT 100s ipfs {} {cid} {}",
+                // "IPFS_PATH=/tmp/ipfs-{index} timeout -s SIGINT 100s ipfs {} {cid} {}",
+                "IPFS_PATH=/tmp/ipfs-{index} timeout -s SIGINT 30s ipfs {} {cid} {}",
                 if dag { "dag get" } else { "get -o /dev/null" },
                 if dag { " && echo" } else { "" }
             ))
             .status()
             .await?;
         if !status.success() {
-            println!("! [{index:02}] Failed to finish download {cid} via {id}");
+            println!("! [{index:02}] Failed to finish download via {id}");
             break 'job;
         }
 
