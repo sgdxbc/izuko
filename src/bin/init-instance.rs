@@ -17,9 +17,12 @@ fn main() -> anyhow::Result<()> {
     let status = Command::new("ssh")
         .arg(&host)
         .arg(concat!(
-            "sudo cp ipfs /usr/local/bin",
+            "rm -rf .ipfs",
+            "; sudo cp ipfs /usr/local/bin",
+            // " && sleep 1",
             " && ipfs init --profile server",
             " && ipfs config Internal.Bitswap.ProviderSearchDelay 0",
+            " && ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001",
             " && sudo sysctl -w net.core.rmem_max=2500000",
             " && sudo sysctl -w net.core.wmem_max=2500000",
         ))

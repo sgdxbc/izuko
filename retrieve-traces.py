@@ -60,6 +60,6 @@ with grpc.insecure_channel(f'{sys.argv[1]}:16685', options=options) as channel:
 path = Path(dict(enumerate(sys.argv)).get(3) or 'traces')
 path.mkdir(exist_ok=True, parents=True)
 with open(path / f'{start_time_min.ToJsonString()}.json', 'w') as trace_file:
-    dump(trace_spans, trace_file)
-with open(path / f'{start_time_min.ToJsonString()}_other.json', 'w') as trace_file:
-    dump(other_spans, trace_file)
+    dump(trace_spans + other_spans, trace_file)
+# with open(path / f'{start_time_min.ToJsonString()}_other.json', 'w') as trace_file:
+#     dump(other_spans, trace_file)
